@@ -92,15 +92,16 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
 // or 0 if not mapped.
 // Can only be used to look up user pages.
 uint64
-walkaddr(pagetable_t pagetable, uint64 va)
+walkaddr(pagetable_t pagetable, uint64 va) // 检查用户提供的虚拟地址是否在进程的用户空间中，并返回其对应的物理地址
 {
   pte_t *pte;
   uint64 pa;
 
-  if(va >= MAXVA)
+  if(va >= MAXVA) // 检查是否大于最大虚拟地址
     return 0;
 
-  pte = walk(pagetable, va, 0);
+  pte = walk(pagetable, va, 0);  //Return the address of the PTE in page table pagetable
+                                 // that corresponds to virtual address va.
   if(pte == 0)
     return 0;
   if((*pte & PTE_V) == 0)
@@ -409,12 +410,12 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   int got_null = 0;
 
   while(got_null == 0 && max > 0){
-    va0 = PGROUNDDOWN(srcva);
+    va0 = PGROUNDDOWN(srcva); // 将源虚拟地址调整到页起始处
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > max)
+    n = PGSIZE - (srcva - va0); // 从源虚拟地址到页结尾的字节数
+    if(n > max) // max表示字节数
       n = max;
 
     char *p = (char *) (pa0 + (srcva - va0));
