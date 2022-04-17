@@ -34,12 +34,14 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
+      /*
       char *pa = kalloc();
       if(pa == 0)
         panic("kalloc");
       uint64 va = KSTACK((int) (p - proc));
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
       p->kstack = va;
+      */
   }
   kvminithart();
 }
@@ -127,6 +129,14 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->kpgtb = proc_pgtb_init();
+  char *pa = kalloc();
+  if (pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int)0);
+  uvmmap(p->kpgtb, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
+
   return p;
 }
 
@@ -150,6 +160,22 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  // 释放掉进程自己的栈
+  if (p->kstack){
+    void *kstack_pa = (void *)proc_kvmpa(p->kpgtb, p->kstack);
+    kfree(kstack_pa);
+  }
+  p->kstack = 0;
+  // 释放进程自己的内核页表，只释放页表项为不是放叶节点的物理页
+  // 进程内核栈和全局内核栈的区别：
+  //      内核物理地址都是虚拟地址和内核地址的直接映射（两个是相同的，都映射到相同的物理页面）
+  //      区别在于用户栈，进程内核栈中增加了进程栈的虚拟地址到物理地址的映射，而全局内核栈现在删除了这部分映射
+  // 所以释放进程内核页表时，只能释放页表项不能释放物理页（全局内核栈还需使用）
+  if (p->kpgtb) {
+    kvm_free_kpgtb(p->kpgtb);
+  }
+  p->kpgtb = 0;
 }
 
 // Create a user page table for a given process,
@@ -473,6 +499,11 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
+        // 切换到进程独立的内核页表
+        w_satp(MAKE_SATP(p->kpgtb));
+        sfence_vma(); // 清除快表缓存
+
         swtch(&c->context, &p->context);
 
         // Process is done running for now.

@@ -43,15 +43,48 @@ pagetable_level(pagetable_t pagetable, int level)
   }
 }
 
+pagetable_t
+proc_pgtb_init(void)
+{
+  pagetable_t proc_kpgtb = (pagetable_t) uvmcreate();
+  if (proc_kpgtb == 0)
+    return 0;
+   // uart registers
+  uvmmap(proc_kpgtb, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+  // virtio mmio disk interface
+  uvmmap(proc_kpgtb, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+  // CLINT
+  uvmmap(proc_kpgtb, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  // PLIC
+  uvmmap(proc_kpgtb, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+  // map kernel text executable and read-only.
+  uvmmap(proc_kpgtb, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+  // map kernel data and the physical RAM we'll make use of.
+  uvmmap(proc_kpgtb, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  uvmmap(proc_kpgtb, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+  return proc_kpgtb;
+}
+
+void
+uvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint sz, int perm)
+{
+  if(mappages(pagetable, va, sz, pa, perm) != 0)
+    panic("uvmmap");
+}
+
 /*
  * create a direct-map page table for the kernel.
  */
+// 设置好内核的地址空间
 void
 kvminit()
 {
+  // 为最高级的page目录分配物理页并将内存段初始化为0
   kernel_pagetable = (pagetable_t) kalloc();
   memset(kernel_pagetable, 0, PGSIZE);
-
+ 
   // uart registers
   kvmmap(UART0, UART0, PGSIZE, PTE_R | PTE_W);
 
@@ -80,6 +113,9 @@ kvminit()
 void
 kvminithart()
 {
+  // 设置SATP寄存器（保存了最高一级page dictionary的基址）
+  // 该指令之后page table开始生效，此后程序使用的地址就是虚拟地址
+  // 能够正确工作的原因：内核虚拟地址和物理地址是直接映射的关系
   w_satp(MAKE_SATP(kernel_pagetable));
   sfence_vma();
 }
@@ -167,6 +203,37 @@ kvmpa(uint64 va)
     panic("kvmpa");
   pa = PTE2PA(*pte);
   return pa+off;
+}
+
+uint64
+proc_kvmpa(pagetable_t pagetable, uint64 va)
+{
+  uint64 off = va % PGSIZE;
+  pte_t *pte;
+  uint64 pa;
+
+  pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    panic("proc_kvmpa");
+  if((*pte & PTE_V) == 0)
+    panic("proc_kvmpa");
+  pa = PTE2PA(*pte);
+  return pa+off;
+}
+
+void
+kvm_free_kpgtb(pagetable_t pagetable)
+{
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      kvm_free_kpgtb((pagetable_t)child);
+      pagetable[i] = 0;
+    }
+  }
+  kfree((void*)pagetable);
 }
 
 // Create PTEs for virtual addresses starting at va that refer to
