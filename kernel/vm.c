@@ -48,9 +48,10 @@ pagetable_t
 proc_pgtb_init(void)
 {
   //printf("proc_pgtb_init\n");
-  pagetable_t proc_kpgtb = (pagetable_t) uvmcreate();
+  pagetable_t proc_kpgtb = (pagetable_t) kalloc();
   if (proc_kpgtb == 0)
     return 0;
+  memset(proc_kpgtb, 0, PGSIZE);
    // uart registers
   proc_kvmmap(proc_kpgtb, UART0, UART0, PGSIZE, PTE_R | PTE_W);
   // virtio mmio disk interface
@@ -476,6 +477,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
+  
   uint64 n, va0, pa0;
 
   while(len > 0){
@@ -492,7 +494,24 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     dst += n;
     srcva = va0 + PGSIZE;
   }
+
   return 0;
+  /*
+  uint64 n, va0;
+  while (len > 0) {
+    va0 = PGROUNDDOWN(srcva);
+    n = PGSIZE - (srcva - va0);
+    if(n > len)
+      n = len;
+    if (copyin_new(pagetable, dst, va0, n) == -1) {
+      return -1;
+    }
+    len -= n;
+    dst += n;
+    srcva = va0 + PGSIZE;
+  }
+  return 0;
+  */
 }
 
 // Copy a null-terminated string from user to kernel.
