@@ -94,6 +94,7 @@ allocpid() {
 static struct proc*
 allocproc(void)
 {
+  //printf("allocproc\n");
   struct proc *p;
 
   for(p = proc; p < &proc[NPROC]; p++) {
@@ -122,20 +123,21 @@ found:
     release(&p->lock);
     return 0;
   }
+  
+  p->kpgtb = proc_pgtb_init();
+  char *pa = kalloc();
+  if (pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int)0);
+  proc_kvmmap(p->kpgtb, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
+  //vmprint(p->kpgtb);
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
-  p->kpgtb = proc_pgtb_init();
-  char *pa = kalloc();
-  if (pa == 0)
-    panic("kalloc");
-  uint64 va = KSTACK((int)0);
-  uvmmap(p->kpgtb, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-  p->kstack = va;
 
   return p;
 }
@@ -183,6 +185,7 @@ freeproc(struct proc *p)
 pagetable_t
 proc_pagetable(struct proc *p)
 {
+  //printf("proc_pagetable\n");
   pagetable_t pagetable;
 
   // An empty page table.
@@ -237,6 +240,7 @@ uchar initcode[] = {
 void
 userinit(void)
 {
+  //printf("userinit\n");
   struct proc *p;
 
   p = allocproc();
@@ -482,6 +486,7 @@ wait(uint64 addr)
 void
 scheduler(void)
 {
+  //printf("scheduler\n");
   struct proc *p;
   struct cpu *c = mycpu();
   
@@ -500,11 +505,14 @@ scheduler(void)
         p->state = RUNNING;
         c->proc = p;
 
+        //printf("page table %p\n", p->kpgtb);
         // 切换到进程独立的内核页表
         w_satp(MAKE_SATP(p->kpgtb));
         sfence_vma(); // 清除快表缓存
 
         swtch(&c->context, &p->context);
+
+        kvminithart(); // 切换回全局内核页表
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.

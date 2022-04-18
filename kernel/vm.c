@@ -9,6 +9,7 @@
 /*
  * the kernel's page table.
  */
+
 pagetable_t kernel_pagetable;
 
 extern char etext[];  // kernel.ld sets this to end of kernel code.
@@ -46,32 +47,33 @@ pagetable_level(pagetable_t pagetable, int level)
 pagetable_t
 proc_pgtb_init(void)
 {
+  //printf("proc_pgtb_init\n");
   pagetable_t proc_kpgtb = (pagetable_t) uvmcreate();
   if (proc_kpgtb == 0)
     return 0;
    // uart registers
-  uvmmap(proc_kpgtb, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+  proc_kvmmap(proc_kpgtb, UART0, UART0, PGSIZE, PTE_R | PTE_W);
   // virtio mmio disk interface
-  uvmmap(proc_kpgtb, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+  proc_kvmmap(proc_kpgtb, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
   // CLINT
-  uvmmap(proc_kpgtb, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  proc_kvmmap(proc_kpgtb, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
   // PLIC
-  uvmmap(proc_kpgtb, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+  proc_kvmmap(proc_kpgtb, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
   // map kernel text executable and read-only.
-  uvmmap(proc_kpgtb, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+  proc_kvmmap(proc_kpgtb, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
   // map kernel data and the physical RAM we'll make use of.
-  uvmmap(proc_kpgtb, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+  proc_kvmmap(proc_kpgtb, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
   // map the trampoline for trap entry/exit to
   // the highest virtual address in the kernel.
-  uvmmap(proc_kpgtb, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+  proc_kvmmap(proc_kpgtb, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
   return proc_kpgtb;
 }
 
 void
-uvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint sz, int perm)
+proc_kvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint sz, int perm)
 {
   if(mappages(pagetable, va, sz, pa, perm) != 0)
-    panic("uvmmap");
+    panic("proc_kvmmap");
 }
 
 /*

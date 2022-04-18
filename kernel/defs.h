@@ -160,7 +160,7 @@ int             uartgetc(void);
 // vm.c
 pagetable_t     proc_pgtb_init(void);
 uint64          proc_kvmpa(pagetable_t pagetable, uint64 va);
-void            uvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint sz, int perm);
+void            proc_kvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint sz, int perm);
 void            kvm_free_kpgtb(pagetable_t pagetable);
 void            vmprint(pagetable_t);
 void            pagetable_level(pagetable_t pagetable, int level);
