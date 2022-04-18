@@ -128,6 +128,7 @@ found:
   char *pa = kalloc();
   if (pa == 0)
     panic("kalloc");
+  //memset(pa, 0, PGSIZE);
   uint64 va = KSTACK((int)0);
   proc_kvmmap(p->kpgtb, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
   p->kstack = va;
@@ -250,6 +251,9 @@ userinit(void)
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
+  if (kvm_copy_mappings(p->pagetable, p->kpgtb, 0, p->sz) < 0) {
+    panic("userinit:unable to copy user pagetable to kernal.");
+  }
 
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
@@ -273,11 +277,18 @@ growproc(int n)
 
   sz = p->sz;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    uint64 newsz;
+    if((newsz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    if (kvm_copy_mappings(p->pagetable, p->kpgtb, sz, n) < 0) {
+      uvmdealloc(p->pagetable, newsz, sz); // 如果更新映射失败，则将刚刚用户空间新增加的映射删除
+      return -1;
+    }
+    sz = newsz;
   } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    uvmdealloc(p->pagetable, sz, sz + n);
+    sz = kvmdealloc(p->kpgtb, sz, sz + n); // 内核页表和用户页表同步缩小
   }
   p->sz = sz;
   return 0;
@@ -299,6 +310,12 @@ fork(void)
 
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+
+  if (kvm_copy_mappings(np->pagetable, np->kpgtb, 0, p->sz) < 0) {
     freeproc(np);
     release(&np->lock);
     return -1;

@@ -56,8 +56,9 @@ proc_pgtb_init(void)
   proc_kvmmap(proc_kpgtb, UART0, UART0, PGSIZE, PTE_R | PTE_W);
   // virtio mmio disk interface
   proc_kvmmap(proc_kpgtb, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
-  // CLINT
-  proc_kvmmap(proc_kpgtb, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  // CLINT 核心本地中断器，将用户空间的pagetable拷贝到内存后，该区域会和程序内存冲突
+  // CLINT 只在内核启动的时候需要用到，用户进程在内核态中的操作并不需要使用该映射
+  //proc_kvmmap(proc_kpgtb, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
   // PLIC
   proc_kvmmap(proc_kpgtb, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
   // map kernel text executable and read-only.
@@ -356,12 +357,28 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 uint64
 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
+  //printf("uvmdealloc\n");
   if(newsz >= oldsz)
     return oldsz;
 
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+  }
+
+  return newsz;
+}
+
+uint64
+kvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+  //printf("kvmdealloc\n");
+  if(newsz >= oldsz)
+    return oldsz;
+
+  if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 0);
   }
 
   return newsz;
@@ -477,7 +494,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-  
+  /*
   uint64 n, va0, pa0;
 
   while(len > 0){
@@ -496,22 +513,8 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   }
 
   return 0;
-  /*
-  uint64 n, va0;
-  while (len > 0) {
-    va0 = PGROUNDDOWN(srcva);
-    n = PGSIZE - (srcva - va0);
-    if(n > len)
-      n = len;
-    if (copyin_new(pagetable, dst, va0, n) == -1) {
-      return -1;
-    }
-    len -= n;
-    dst += n;
-    srcva = va0 + PGSIZE;
-  }
-  return 0;
   */
+  return copyin_new(pagetable, dst, srcva, len);
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -521,6 +524,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
+  /*
   uint64 n, va0, pa0;
   int got_null = 0;
 
@@ -555,4 +559,33 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+  */
+  return copyinstr_new(pagetable, dst, srcva, max);
 }
+
+int
+kvm_copy_mappings(pagetable_t upgtb, pagetable_t kpgtb, uint64 start, uint64 sz) {
+  //printf("kvm_copy_mappings\n");
+  pte_t *pte;
+  uint64 end = start + sz;
+  //if (end > PLIC) {
+    //end = PLIC;
+  //}
+  start = PGROUNDUP(start);
+  for(; start < end; start += PGSIZE) {
+    if ((pte = walk(upgtb, start, 0)) == 0) {
+      panic("kvm_copy_mappings: pte should exist");
+    }
+    if ((*pte & PTE_V) == 0) {
+      panic("kvmcopymappings: page not present");
+    }
+    uint64 pa = PTE2PA(*pte);
+    uint flags = PTE_FLAGS(*pte) & ~PTE_U;
+    if (mappages(kpgtb, start, PGSIZE, pa, flags) != 0) {
+      uvmunmap(kpgtb, 0, start / PGSIZE, 0);
+      return -1;
+    }
+  }
+  return 0;
+}
+

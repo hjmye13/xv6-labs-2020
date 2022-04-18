@@ -51,6 +51,9 @@ exec(char *path, char **argv)
     uint64 sz1;
     if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
       goto bad;
+    if (sz1 >= PLIC) {
+      goto bad;
+    }
     sz = sz1;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
@@ -107,10 +110,16 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
+
+  uvmunmap(p->kpgtb, 0, PGROUNDUP(oldsz) / PGSIZE, 0); // 注意这里是oldsz，将原来的页表映射删除
+  if (kvm_copy_mappings(pagetable, p->kpgtb, 0, sz) < 0) {
+    return -1;
+  }
     
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
+  //printf("exec\n");
   p->sz = sz;
   p->trapframe->epc = elf.entry;  // initial program counter = main
   p->trapframe->sp = sp; // initial stack pointer
