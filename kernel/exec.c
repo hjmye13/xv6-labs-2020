@@ -110,12 +110,12 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
-
+  
   uvmunmap(p->kpgtb, 0, PGROUNDUP(oldsz) / PGSIZE, 0); // 注意这里是oldsz，将原来的页表映射删除
   if (kvm_copy_mappings(pagetable, p->kpgtb, 0, sz) < 0) {
     return -1;
   }
-    
+  
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
