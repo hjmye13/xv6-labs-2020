@@ -63,11 +63,14 @@ uservec:
 	# save the user a0 in p->trapframe->a0
         csrr t0, sscratch
         sd t0, 112(a0)
+        # 以上为保护用户寄存器
 
         # restore kernel stack pointer from p->trapframe->kernel_sp
+        # trapframe中的kernal_sp是由kernal进入用户空间之前就设置好的，它的值为这个进程的kernal stack
         ld sp, 8(a0)
 
         # make tp hold the current hartid, from p->trapframe->kernel_hartid
+        # 将cpu编号hartid保存在tp寄存器上，以确认当前运行在多核CPU的哪个核上
         ld tp, 32(a0)
 
         # load the address of usertrap(), p->trapframe->kernel_trap
@@ -76,12 +79,14 @@ uservec:
         # restore kernel page table from p->trapframe->kernel_satp
         ld t1, 0(a0)
         csrw satp, t1
+        # 至此，成功切换至kernal page table
         sfence.vma zero, zero
 
         # a0 is no longer valid, since the kernel page
         # table does not specially map p->tf.
 
         # jump to usertrap(), which does not return
+        # 77行，t0中保存的是usertrap函数的地址
         jr t0
 
 .globl userret
@@ -93,15 +98,20 @@ userret:
         # a1: user page table, for satp.
 
         # switch to the user page table.
+        # 切换page table
         csrw satp, a1
+        # 清空页表缓存
         sfence.vma zero, zero
 
         # put the saved user a0 in sscratch, so we
         # can swap it with our a0 (TRAPFRAME) in the last step.
+        # 将sscratch恢复成用户保存的a0寄存器
+        # 此时a0中存放的是usertrapret函数传递的trapframe地址
         ld t0, 112(a0)
         csrw sscratch, t0
 
         # restore all but a0 from TRAPFRAME
+        # 恢复之前保存的寄存器 a0除外
         ld ra, 40(a0)
         ld sp, 48(a0)
         ld gp, 56(a0)
