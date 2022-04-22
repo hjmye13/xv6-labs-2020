@@ -78,8 +78,8 @@ usertrap(void)
       } else {
         memset((void *)ka, 0, PGSIZE);
         va = PGROUNDDOWN(va);
-        if (mappages(p->pagetable, va, PGSIZE, ka, PTE_W | PTE_U | PTE_R) != 0) {
-          kfree((void *)va);
+        if (mappages(p->pagetable, va, PGSIZE,(uint64)ka, PTE_W | PTE_U | PTE_R) != 0) {
+          kfree((void *)ka);
           p->killed = 1;
         }
       }

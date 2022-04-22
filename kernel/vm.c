@@ -5,8 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-// #include "spinlock.h"
-// #include "proc.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -107,6 +107,20 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
   if((*pte & PTE_V) == 0)
     return 0;
+    /*
+  if((pte == 0) || ((*pte & PTE_V) == 0)) {
+    if (va > myproc()->sz || va < PGROUNDDOWN(myproc()->trapframe->sp)) {
+        return 0;
+    } 
+    if ((pa = (uint64)kalloc()) == 0) return 0;
+    va = PGROUNDDOWN(va);
+    if (mappages(myproc()->pagetable, va, PGSIZE, pa, PTE_W|PTE_X|PTE_R|PTE_U) != 0) {
+        kfree((void*)pa);
+        return 0;
+    }
+    return pa;
+  }
+  */
   if((*pte & PTE_U) == 0)
     return 0;
   pa = PTE2PA(*pte);
@@ -369,8 +383,25 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     }
     */
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if(pa0 == 0) {
+      struct proc *p = myproc();
+      if ((va0 < p->sz) && (va0 > PGROUNDDOWN(p->trapframe->sp))) {
+        // printf("page fault %p\n", va);
+        pa0 = (uint64)kalloc();
+        if (pa0 == 0) {
+          return -1;
+        } else {
+          memset((void *)pa0, 0, PGSIZE);
+          va0 = PGROUNDDOWN(va0);
+          if (mappages(p->pagetable, va0, PGSIZE, pa0, PTE_W | PTE_U | PTE_R) != 0) {
+            kfree((void *)pa0);
+            return -1;
+          }
+        }
+      } else {
+        return -1;
+      }
+    }
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -391,16 +422,28 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   uint64 n, va0, pa0;
 
+  struct proc *p = myproc();
+
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
-    /*
-    if (uvmcheckva(va0)) {
-      uvmlazyalloc(va0);
-    }
-    */
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if(pa0 == 0) {
+      if (va0 < p->sz && va0 > PGROUNDDOWN(p->trapframe->sp)) {
+        pa0 = (uint64)kalloc();
+        if (pa0 == 0) {
+          return -1;
+        } else {
+          memset((void *)pa0, 0, PGSIZE);
+          if (mappages(p->pagetable, va0, PGSIZE, pa0, PTE_W | PTE_U | PTE_R) != 0) {
+            kfree((void *)pa0);
+            return -1;
+          }
+        }
+      } else {
+        return -1;
+      }
+      //return -1;
+    }
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
@@ -412,41 +455,6 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   }
   return 0;
 }
-
-/*
-void
-uvmlazyalloc(uint64 va) 
-{
-  struct proc *p = myproc();
-  if (uvmcheckva(va)) {
-    // printf("page fault %p\n", va);
-    uint64 ka = (uint64)kalloc();
-    if (ka == 0) {
-      p->killed = 1;
-    } else {
-      memset((void *)ka, 0, PGSIZE);
-      va = PGROUNDDOWN(va);
-      if (mappages(p->pagetable, va, PGSIZE, ka, PTE_W | PTE_U | PTE_R) != 0) {
-        kfree((void *)va);
-        p->killed = 1;
-      }
-    }
-  }
-  else {
-    p->killed = 1;
-  }
-}
-
-int 
-uvmcheckva(uint64 va) 
-{
-  pte_t *pte;
-  struct proc *p = myproc();
-  return (va < p->sz) && 
-         (va > PGROUNDDOWN(p->trapframe->sp)) &&
-         (((pte = walk(p->pagetable, va, 0))==0) || ((*pte & PTE_V)==0));
-}
-*/
 
 // Copy a null-terminated string from user to kernel.
 // Copy bytes to dst from virtual address srcva in a given page table,
