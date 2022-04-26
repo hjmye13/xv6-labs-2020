@@ -16,12 +16,14 @@ main(void)
 {
   int pid, wpid;
 
-  if(open("console", O_RDWR) < 0){
-    mknod("console", CONSOLE, 0);
+  if(open("console", O_RDWR) < 0){ // 文件描述符0
+    mknod("console", CONSOLE, 0); // 创建console设备
     open("console", O_RDWR);
   }
   dup(0);  // stdout
   dup(0);  // stderr
+  // 通过复制文件描述符0，得到另外两个文件描述符1、2
+  // 最终文件描述符0、1、2都代表console
 
   for(;;){
     printf("init: starting sh\n");

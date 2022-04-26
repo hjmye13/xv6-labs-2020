@@ -173,6 +173,10 @@ clockintr()
 // returns 2 if timer interrupt,
 // 1 if other device,
 // 0 if not recognized.
+// 检查是外部中断或软件中断
+// 2是时钟中断
+// 1表示其他设备
+// 0表示未识别
 int
 devintr()
 {

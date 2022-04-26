@@ -63,9 +63,9 @@ consolewrite(int user_src, uint64 src, int n)
   acquire(&cons.lock);
   for(i = 0; i < n; i++){
     char c;
-    if(either_copyin(&c, user_src, src+i, 1) == -1)
+    if(either_copyin(&c, user_src, src+i, 1) == -1) // 将字符拷入
       break;
-    uartputc(c);
+    uartputc(c); // 将字符写入UART设备
   }
   release(&cons.lock);
 
@@ -78,6 +78,7 @@ consolewrite(int user_src, uint64 src, int n)
 // user_dist indicates whether dst is a user
 // or kernel address.
 //
+// user_dst表示dst是用户地址还是内核地址
 int
 consoleread(int user_dst, uint64 dst, int n)
 {
@@ -90,6 +91,7 @@ consoleread(int user_dst, uint64 dst, int n)
   while(n > 0){
     // wait until interrupt handler has put some
     // input into cons.buffer.
+    // 读写的索引是相同的，此时没有输入可以读取
     while(cons.r == cons.w){
       if(myproc()->killed){
         release(&cons.lock);
@@ -98,18 +100,19 @@ consoleread(int user_dst, uint64 dst, int n)
       sleep(&cons.r, &cons.lock);
     }
 
-    c = cons.buf[cons.r++ % INPUT_BUF];
+    c = cons.buf[cons.r++ % INPUT_BUF]; // 读取一个字符
 
     if(c == C('D')){  // end-of-file
       if(n < target){
         // Save ^D for next time, to make sure
         // caller gets a 0-byte result.
-        cons.r--;
+        cons.r--; // 因为前面读取了一个字符之后将read_index++了
       }
       break;
     }
 
     // copy the input byte to the user-space buffer.
+    // 拷贝到目标地址
     cbuf = c;
     if(either_copyout(user_dst, dst, &cbuf, 1) == -1)
       break;
@@ -120,6 +123,7 @@ consoleread(int user_dst, uint64 dst, int n)
     if(c == '\n'){
       // a whole line has arrived, return to
       // the user-level read().
+      // 读到一行的结束
       break;
     }
   }
@@ -135,7 +139,7 @@ consoleread(int user_dst, uint64 dst, int n)
 // wake up consoleread() if a whole line has arrived.
 //
 void
-consoleintr(int c)
+ consoleintr(int c)
 {
   acquire(&cons.lock);
 
@@ -180,12 +184,16 @@ consoleintr(int c)
   release(&cons.lock);
 }
 
+/*
+配置UART每收到一个字节都产生中断
+并且没完成一个字节的输出都会产生中断
+*/
 void
 consoleinit(void)
 {
   initlock(&cons.lock, "cons");
 
-  uartinit();
+  uartinit(); // 设置好UART芯片使其可以被使用
 
   // connect read and write system calls
   // to consoleread and consolewrite.

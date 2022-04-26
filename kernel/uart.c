@@ -13,6 +13,7 @@
 // the UART control registers are memory-mapped
 // at address UART0. this macro returns the
 // address of one of the registers.
+// 返回某个UART寄存器的地址
 #define Reg(reg) ((volatile unsigned char *)(UART0 + reg))
 
 // the UART control registers.
@@ -31,11 +32,11 @@
 #define LCR 3                 // line control register
 #define LCR_EIGHT_BITS (3<<0)
 #define LCR_BAUD_LATCH (1<<7) // special mode to set baud rate
-#define LSR 5                 // line status register
+#define LSR 5                 // line status register 
 #define LSR_RX_READY (1<<0)   // input is waiting to be read from RHR
 #define LSR_TX_IDLE (1<<5)    // THR can accept another character to send
 
-#define ReadReg(reg) (*(Reg(reg)))
+#define ReadReg(reg) (*(Reg(reg))) // 读取某个UART寄存器的内容
 #define WriteReg(reg, v) (*(Reg(reg)) = (v))
 
 // the transmit output buffer.
@@ -56,6 +57,7 @@ uartinit(void)
   WriteReg(IER, 0x00);
 
   // special mode to set baud rate.
+  // 设置串口线传输速率
   WriteReg(LCR, LCR_BAUD_LATCH);
 
   // LSB for baud rate of 38.4K.
@@ -94,14 +96,14 @@ uartputc(int c)
   }
 
   while(1){
-    if(((uart_tx_w + 1) % UART_TX_BUF_SIZE) == uart_tx_r){
+    if(((uart_tx_w + 1) % UART_TX_BUF_SIZE) == uart_tx_r){ // 检查环形缓冲区是否已满
       // buffer is full.
       // wait for uartstart() to open up space in the buffer.
       sleep(&uart_tx_r, &uart_tx_lock);
     } else {
       uart_tx_buf[uart_tx_w] = c;
       uart_tx_w = (uart_tx_w + 1) % UART_TX_BUF_SIZE;
-      uartstart();
+      uartstart(); // 通知设备执行操作
       release(&uart_tx_lock);
       return;
     }
@@ -152,9 +154,11 @@ uartstart()
     
     int c = uart_tx_buf[uart_tx_r];
     uart_tx_r = (uart_tx_r + 1) % UART_TX_BUF_SIZE;
+    // 缓冲区中读出数据
     
     // maybe uartputc() is waiting for space in the buffer.
     wakeup(&uart_tx_r);
+    // 将数据写入发送寄存器
     
     WriteReg(THR, c);
   }
@@ -162,6 +166,7 @@ uartstart()
 
 // read one input character from the UART.
 // return -1 if none is waiting.
+// 从UART读取一个字符
 int
 uartgetc(void)
 {
@@ -181,7 +186,7 @@ uartintr(void)
 {
   // read and process incoming characters.
   while(1){
-    int c = uartgetc();
+    int c = uartgetc(); // 从UART读取一个字符
     if(c == -1)
       break;
     consoleintr(c);

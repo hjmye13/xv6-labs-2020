@@ -34,8 +34,10 @@ start()
   w_satp(0);
 
   // delegate all interrupts and exceptions to supervisor mode.
+  // 将所有中断设置为supervisor mode
   w_medeleg(0xffff);
   w_mideleg(0xffff);
+  // 设置SIE寄存器接收External，软件和定时器中断
   w_sie(r_sie() | SIE_SEIE | SIE_STIE | SIE_SSIE);
 
   // ask for clock interrupts.

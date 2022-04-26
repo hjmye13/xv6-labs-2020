@@ -261,6 +261,7 @@ r_time()
 static inline void
 intr_on()
 {
+  // 设置sstatus寄存器，打开中断标志位
   w_sstatus(r_sstatus() | SSTATUS_SIE);
 }
 

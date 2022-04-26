@@ -87,6 +87,7 @@ sys_write(void)
 
   if(argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
     return -1;
+  // 检查参数：文件描述符、写入字节数、写入地址
 
   return filewrite(f, p, n);
 }

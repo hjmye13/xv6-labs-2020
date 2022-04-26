@@ -136,15 +136,16 @@ filewrite(struct file *f, uint64 addr, int n)
 {
   int r, ret = 0;
 
-  if(f->writable == 0)
+  if(f->writable == 0) // 判断文件是否可写
     return -1;
-
-  if(f->type == FD_PIPE){
+  
+  // 判断文件的类型
+  if(f->type == FD_PIPE){ 
     ret = pipewrite(f->pipe, addr, n);
-  } else if(f->type == FD_DEVICE){
+  } else if(f->type == FD_DEVICE){ // mknod生成的文件描述符属于这种类型
     if(f->major < 0 || f->major >= NDEV || !devsw[f->major].write)
       return -1;
-    ret = devsw[f->major].write(1, addr, n);
+    ret = devsw[f->major].write(1, addr, n); // 调用相应的写函数
   } else if(f->type == FD_INODE){
     // write a few blocks at a time to avoid exceeding
     // the maximum log transaction size, including

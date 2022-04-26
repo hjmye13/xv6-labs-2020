@@ -462,6 +462,7 @@ scheduler(void)
   c->proc = 0;
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
+    // 使CPU能够接收中断
     intr_on();
     
     int nproc = 0;
@@ -552,6 +553,7 @@ forkret(void)
 
 // Atomically release lock and sleep on chan.
 // Reacquires lock when awakened.
+// chan可以理解为因为某个时间sleep
 void
 sleep(void *chan, struct spinlock *lk)
 {
