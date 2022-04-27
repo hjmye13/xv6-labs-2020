@@ -123,6 +123,9 @@ found:
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
+  // 设置好新进程的context
+  // 在第一次调用swtch的时候，可以返回到forkret处
+  // 重要的是设置好ra（返回地址）和sp（栈指针）
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
@@ -498,23 +501,25 @@ scheduler(void)
 // be proc->intena and proc->noff, but that would
 // break in the few places where a lock is held but
 // there's no process.
+// 切换到scheduler
 void
 sched(void)
 {
   int intena;
   struct proc *p = myproc();
 
-  if(!holding(&p->lock))
+  // 进行一些合理性检查
+  if(!holding(&p->lock)) // 检查是否已经获取了锁
     panic("sched p->lock");
-  if(mycpu()->noff != 1)
+  if(mycpu()->noff != 1) 
     panic("sched locks");
-  if(p->state == RUNNING)
+  if(p->state == RUNNING) // 检查进程的状态
     panic("sched running");
-  if(intr_get())
+  if(intr_get()) // 检查中断是否关闭
     panic("sched interruptible");
 
   intena = mycpu()->intena;
-  swtch(&p->context, &mycpu()->context);
+  swtch(&p->context, &mycpu()->context);// 切换context，从当前进程的context切换到scheduler的context
   mycpu()->intena = intena;
 }
 
@@ -523,8 +528,9 @@ void
 yield(void)
 {
   struct proc *p = myproc();
-  acquire(&p->lock);
-  p->state = RUNNABLE;
+  acquire(&p->lock); // 获取当前进程的锁
+  p->state = RUNNABLE; // 事实上当前进程仍在运行，代码正在当前进程的内核线程中运行
+  // 加锁的目的，即使将进程的状态改成runnable，其他CPU核的线程调度线程也不能看到进程状态为runnable，并尝试运行它
   sched();
   release(&p->lock);
 }
@@ -545,6 +551,11 @@ forkret(void)
     // be run from main().
     first = 0;
     fsinit(ROOTDEV);
+    // 文件系统需要被初始化，具体来说，需要从磁盘中读取一些数据来确保文件系统的运行
+    // 比如文件系统的大小，各种文件在文件系统的位置，以及crash recovery log等
+    // 完成任何文件系统的操作都需要等待磁盘操作结束
+    // 但是xv6只能在进程context下执行文件系统操作，比如等待IO
+    // 所以初始化文件系统需要有了进程才能进行，这一步是第一次调用forkret完成的
   }
 
   usertrapret();

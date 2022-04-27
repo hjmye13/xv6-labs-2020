@@ -2,8 +2,15 @@
 #
 #   void swtch(struct context *old, struct context *new);
 # 
-# Save current registers in old. Load from new.	
+# Save current registers in old. Load from new.
 
+# a0中保存的是old context的基址
+# a1中保存的是new context的基址
+# 保存old context，将new context更新至寄存器中
+# 只保存又被调用者保存的寄存器，调用者保存的寄存器通过C代码保存在栈中
+# 不保存程序计数器
+# 当swtch返回时，返回更新后ra寄存器保存的返回地址所指向的指令
+# 这条返回指令是新线程之前调用swtch的地方，并且返回新线程的栈
 
 .globl swtch
 swtch:
