@@ -33,6 +33,7 @@ struct {
   struct buf head;
 } bcache;
 
+// buffer cache是双向链接的列表
 void
 binit(void)
 {
@@ -50,11 +51,15 @@ binit(void)
     bcache.head.next->prev = b;
     bcache.head.next = b;
   }
+  // 将数组buf中的块链接起来，每次都接到head的后面
+  // 其余所有对buf的访问都是通过head链表进行的，而不是直接访问buf数组
 }
 
 // Look through buffer cache for block on device dev.
 // If not found, allocate a buffer.
 // In either case, return locked buffer.
+// 查找buffer cache中是否有目标buffer
+// 如果没有找到就分配一个buffer
 static struct buf*
 bget(uint dev, uint blockno)
 {
@@ -65,9 +70,10 @@ bget(uint dev, uint blockno)
   // Is the block already cached?
   for(b = bcache.head.next; b != &bcache.head; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
-      b->refcnt++;
+      b->refcnt++; // 递增引用次数
       release(&bcache.lock);
-      acquiresleep(&b->lock);
+      acquiresleep(&b->lock); // 确保每个每个buffer cache只有一个进程使用
+      // 这种情况下，当进程获得buffer的使用权之后，buffer的valid位为1
       return b;
     }
   }
@@ -78,7 +84,7 @@ bget(uint dev, uint blockno)
     if(b->refcnt == 0) {
       b->dev = dev;
       b->blockno = blockno;
-      b->valid = 0;
+      b->valid = 0;// 表示是新分配的块
       b->refcnt = 1;
       release(&bcache.lock);
       acquiresleep(&b->lock);
@@ -86,6 +92,7 @@ bget(uint dev, uint blockno)
     }
   }
   panic("bget: no buffers");
+  // 没有可分配的buffer
 }
 
 // Return a locked buf with the contents of the indicated block.
@@ -96,7 +103,7 @@ bread(uint dev, uint blockno)
 
   b = bget(dev, blockno);
   if(!b->valid) {
-    virtio_disk_rw(b, 0);
+    virtio_disk_rw(b, 0); // 从磁盘中读取块，b中保存了dev和blockno的值
     b->valid = 1;
   }
   return b;
@@ -106,9 +113,9 @@ bread(uint dev, uint blockno)
 void
 bwrite(struct buf *b)
 {
-  if(!holdingsleep(&b->lock))
+  if(!holdingsleep(&b->lock)) // 检查该buffer是否为blocked并且是当前进程所持有的
     panic("bwrite");
-  virtio_disk_rw(b, 1);
+  virtio_disk_rw(b, 1); // 将其写回磁盘
 }
 
 // Release a locked buffer.
@@ -119,11 +126,12 @@ brelse(struct buf *b)
   if(!holdingsleep(&b->lock))
     panic("brelse");
 
-  releasesleep(&b->lock);
+  releasesleep(&b->lock); // 将blocked和pid置零，并且唤醒等待该锁的进程
 
   acquire(&bcache.lock);
   b->refcnt--;
   if (b->refcnt == 0) {
+    // 没有进程使用当前buf，将其移到buf list的头部
     // no one is waiting for it.
     b->next->prev = b->prev;
     b->prev->next = b->next;
