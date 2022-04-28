@@ -133,6 +133,9 @@ found:
 // free a proc structure and the data hanging from it,
 // including user pages.
 // p->lock must be held.
+// 由父进程的wait函数调用
+// unix系统中每一个退出的进程都需要有一个对应的wait系统调用
+// init进程的共工作就是在循环中不停调用wait，确保对该进程调用freeproc，清理进程资源
 static void
 freeproc(struct proc *p)
 {
@@ -149,7 +152,7 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
-  p->state = UNUSED;
+  p->state = UNUSED; 
 }
 
 // Create a user page table for a given process,
@@ -396,6 +399,9 @@ exit(int status)
 
   // Jump into the scheduler, never to return.
   sched();// 当前进程的状态已经设置位ZOMBIE，因此不会再返回
+  // 现在进程还没有完全释放它的资源，所以不能被重用
+  // 当前位置，进程的状态为ZOMBIE，进程不会再运行，同时进程资源没有完全释放
+  // 子进程的资源在父进程中通过的wait函数中通过freeproc释放
   panic("zombie exit");
 }
 
@@ -437,6 +443,7 @@ wait(uint64 addr)
             return -1;
           }
           freeproc(np); // 释放子进程（trapframe、pagetable、设置进程状态)
+          // 清理子进程的资源后，子进程的状态变为unused
           release(&np->lock);
           release(&p->lock);
           return pid;
