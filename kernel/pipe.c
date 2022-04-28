@@ -86,18 +86,21 @@ pipewrite(struct pipe *pi, uint64 addr, int n)
   acquire(&pi->lock);
   for(i = 0; i < n; i++){
     while(pi->nwrite == pi->nread + PIPESIZE){  //DOC: pipewrite-full
-      if(pi->readopen == 0 || pr->killed){
+      // nwrite和nread都是大于缓冲区大小的数值
+      // 检查两个数值之前的差值是否等于缓冲区大小
+      // 如果等于，则说明缓冲区已满
+      if(pi->readopen == 0 || pr->killed){ // 缓冲区满并且没有读进程，或者当前进程已经被killed
         release(&pi->lock);
         return -1;
       }
-      wakeup(&pi->nread);
+      wakeup(&pi->nread); // 缓冲区满，但是存在写进程
       sleep(&pi->nwrite, &pi->lock);
     }
-    if(copyin(pr->pagetable, &ch, addr + i, 1) == -1)
+    if(copyin(pr->pagetable, &ch, addr + i, 1) == -1) // 读取一个字符
       break;
-    pi->data[pi->nwrite++ % PIPESIZE] = ch;
+    pi->data[pi->nwrite++ % PIPESIZE] = ch; // 将字符放入缓冲区
   }
-  wakeup(&pi->nread);
+  wakeup(&pi->nread); // 写入完毕，唤醒读进程
   release(&pi->lock);
   return i;
 }
@@ -111,17 +114,18 @@ piperead(struct pipe *pi, uint64 addr, int n)
 
   acquire(&pi->lock);
   while(pi->nread == pi->nwrite && pi->writeopen){  //DOC: pipe-empty
-    if(pr->killed){
+    // 缓冲区已空并且存在写进程
+    if(pr->killed){ // 检查进程状态
       release(&pi->lock);
       return -1;
     }
     sleep(&pi->nread, &pi->lock); //DOC: piperead-sleep
   }
   for(i = 0; i < n; i++){  //DOC: piperead-copy
-    if(pi->nread == pi->nwrite)
-      break;
-    ch = pi->data[pi->nread++ % PIPESIZE];
-    if(copyout(pr->pagetable, addr + i, &ch, 1) == -1)
+    if(pi->nread == pi->nwrite) // 没有可读的数据
+      break; // 每个读进程获得pipe的读取权限之后只能进行一次读取，可能不能读取到n个字符
+    ch = pi->data[pi->nread++ % PIPESIZE]; // 读取字符
+    if(copyout(pr->pagetable, addr + i, &ch, 1) == -1) // 拷贝到用户空间
       break;
   }
   wakeup(&pi->nwrite);  //DOC: piperead-wakeup

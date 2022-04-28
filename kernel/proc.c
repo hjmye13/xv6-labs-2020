@@ -567,17 +567,29 @@ sleep(void *chan, struct spinlock *lk)
     acquire(&p->lock);  //DOC: sleeplock1
     release(lk);
   }
+  /* 持有lk，保证了外部没有进程对chan相关进程进行wake up操作
+   * 持有p->lock，保证了外部没有进程能够修改p的状态为runnable
+   * 因此p不会错过外部进程的wake up操作
+  */
+  // 要修改进行的状态state为sleeping
+  // 检查一下是否已经获得了当前进程的锁
+  // sleep的时候传入了一个锁
+  // 如果不是，释放掉传入的锁（外部可能acquire）并且获得当前进程的锁以便修改状态
 
   // Go to sleep.
+  // 设置等待事件和状态
   p->chan = chan;
   p->state = SLEEPING;
 
   sched();
+  // 保存当前进程的context，返回地址为下一条指令
+  // 当进程被唤醒，被调度时，返回当前位置继续执行
 
   // Tidy up.
   p->chan = 0;
 
   // Reacquire original lock.
+  // 恢复进程sleep前锁的状态
   if(lk != &p->lock){
     release(&p->lock);
     acquire(lk);
@@ -591,6 +603,7 @@ wakeup(void *chan)
 {
   struct proc *p;
 
+  // 将所有等待chan的进程状态设置为runnable，等待CPU调度
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == SLEEPING && p->chan == chan) {
