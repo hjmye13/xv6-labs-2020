@@ -312,11 +312,11 @@ reparent(struct proc *p)
     // acquiring the lock first could cause a deadlock
     // if pp or a child of pp were also in exit()
     // and about to try to lock p.
-    if(pp->parent == p){
+    if(pp->parent == p){ // 如果是p的子进程
       // pp->parent can't change between the check and the acquire()
       // because only the parent changes it, and we're the parent.
       acquire(&pp->lock);
-      pp->parent = initproc;
+      pp->parent = initproc; // 改为init进程的子进程
       // we should wake up init here, but that would require
       // initproc->lock, which would be a deadlock, since we hold
       // the lock on one of init's children (pp). this is why
@@ -329,15 +329,17 @@ reparent(struct proc *p)
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
+// exit：记录exit status、释放部分资源、将子进程都给init进程、唤醒等待的父进程、将调用进程标记zombie、yield CPU
 void
 exit(int status)
 {
   struct proc *p = myproc();
 
-  if(p == initproc)
+  if(p == initproc) // init进程不能exit
     panic("init exiting");
 
   // Close all open files.
+  // 关闭当前进程打开的所有文件
   for(int fd = 0; fd < NOFILE; fd++){
     if(p->ofile[fd]){
       struct file *f = p->ofile[fd];
@@ -366,6 +368,7 @@ exit(int status)
   // exiting parent, but the result will be a harmless spurious wakeup
   // to a dead or wrong process; proc structs are never re-allocated
   // as anything else.
+  // 获得当前进程的父进程
   acquire(&p->lock);
   struct proc *original_parent = p->parent;
   release(&p->lock);
@@ -373,14 +376,18 @@ exit(int status)
   // we need the parent's lock in order to wake it up from wait().
   // the parent-then-child rule says we have to lock it first.
   acquire(&original_parent->lock);
-
+  // 因为wait中首先获取了父进程的lock，然后获取子进程的lock
+  // 修改当前进程的状态和reparent子进程时，要求获得当前进程的lock，所以这里要获取父进程的lock
+  // 获取父进程的lock可以保证父进程不会错过wait
+  //      父进程判断了子进程的状态，子进程修改了状态，然后wake up父进程，之后父进程才进入sleep
+  // 获取父进程的lock可以保证不会死锁：和wait以相同的顺序获取lock
   acquire(&p->lock);
 
   // Give any children to init.
   reparent(p);
 
   // Parent might be sleeping in wait().
-  wakeup1(original_parent);
+  wakeup1(original_parent); // 唤醒父进程
 
   p->xstate = status;
   p->state = ZOMBIE;
@@ -388,12 +395,13 @@ exit(int status)
   release(&original_parent->lock);
 
   // Jump into the scheduler, never to return.
-  sched();
+  sched();// 当前进程的状态已经设置位ZOMBIE，因此不会再返回
   panic("zombie exit");
 }
 
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
+// wait先获得父进程的lock，然后获得子进程的lock
 int
 wait(uint64 addr)
 {
@@ -412,7 +420,7 @@ wait(uint64 addr)
       // this code uses np->parent without holding np->lock.
       // acquiring the lock first would cause a deadlock,
       // since np might be an ancestor, and we already hold p->lock.
-      if(np->parent == p){
+      if(np->parent == p){ // 找到当前进程的子进程
         // np->parent can't change between the check and the acquire()
         // because only the parent changes it, and we're the parent.
         acquire(&np->lock);
@@ -422,11 +430,13 @@ wait(uint64 addr)
           pid = np->pid;
           if(addr != 0 && copyout(p->pagetable, addr, (char *)&np->xstate,
                                   sizeof(np->xstate)) < 0) {
+            // 将子进程的返回状态拷贝到父进程给定的地址
+            // 如果父进程给定的地址位0，表示不关心子进程的返回状态，无需进行拷贝
             release(&np->lock);
             release(&p->lock);
             return -1;
           }
-          freeproc(np);
+          freeproc(np); // 释放子进程（trapframe、pagetable、设置进程状态)
           release(&np->lock);
           release(&p->lock);
           return pid;
@@ -436,6 +446,7 @@ wait(uint64 addr)
     }
 
     // No point waiting if we don't have any children.
+    // 遍历一遍发现该进程没有子进程或已经被kill，则停止等待
     if(!havekids || p->killed){
       release(&p->lock);
       return -1;
@@ -628,6 +639,11 @@ wakeup1(struct proc *p)
 // Kill the process with the given pid.
 // The victim won't exit until it tries to return
 // to user space (see usertrap() in trap.c).
+/* 设置进程的p->killed
+ * 如果进程在sleep，则唤醒进程
+ * 进程进入或离开内核，如果p->killed被设置，usertrap会调用exit
+ * 如果被杀死的进程运行在用户空间，很快进程将通过系统调用或时钟中断进入内核           
+ */
 int
 kill(int pid)
 {
@@ -636,7 +652,7 @@ kill(int pid)
   for(p = proc; p < &proc[NPROC]; p++){
     acquire(&p->lock);
     if(p->pid == pid){
-      p->killed = 1;
+      p->killed = 1; 
       if(p->state == SLEEPING){
         // Wake process from sleep().
         p->state = RUNNABLE;
