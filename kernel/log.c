@@ -34,7 +34,7 @@
 // and to keep track in memory of logged block# before commit.
 struct logheader {
   int n;
-  int block[LOGSIZE];
+  int block[LOGSIZE]; // 30
 };
 
 struct log {
@@ -50,6 +50,16 @@ struct log log;
 
 static void recover_from_log(void);
 static void commit();
+
+/* 系统调用中log的基本格式
+ * begin_op(); // 确保log没有在committing，并且log中足够的空间，outstanding计数+1，当前进程继续运行
+ * ...
+ * bp = bread(...);
+ * bp->data[...] = ...;
+ * log_write(bp);
+ * ...
+ * end_op();
+*/
 
 void
 initlog(int dev, struct superblock *sb)
@@ -129,13 +139,15 @@ begin_op(void)
   acquire(&log.lock);
   while(1){
     if(log.committing){
-      sleep(&log, &log.lock);
+      sleep(&log, &log.lock); // 等到logging系统不进行提交时
+      // 等待log，sleep时释放log的锁
     } else if(log.lh.n + (log.outstanding+1)*MAXOPBLOCKS > LOGSIZE){
+      // 正在运行的系统调用每个按照MAXOPBLOCKS进行计算
       // this op might exhaust log space; wait for commit.
-      sleep(&log, &log.lock);
+      sleep(&log, &log.lock); // 等待有足够的剩余空间可以使用
     } else {
-      log.outstanding += 1;
-      release(&log.lock);
+      log.outstanding += 1; // 该进程开始执行
+      release(&log.lock); // 释放掉log的锁
       break;
     }
   }
@@ -216,7 +228,7 @@ log_write(struct buf *b)
 {
   int i;
 
-  if (log.lh.n >= LOGSIZE || log.lh.n >= log.size - 1)
+  if (log.lh.n >= LOGSIZE || log.lh.n >= log.size - 1) // 检查当前transaction的大小
     panic("too big a transaction");
   if (log.outstanding < 1)
     panic("log_write outside of trans");
