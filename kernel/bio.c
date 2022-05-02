@@ -25,14 +25,15 @@
 
 struct {
   struct spinlock lock;
-  struct buf buf[NBUF];
+  struct buf buf[NBUF]; // 30
 
   // Linked list of all buffers, through prev/next.
   // Sorted by how recently the buffer was used.
   // head.next is most recent, head.prev is least.
-  struct buf head;
+  struct buf head; // dummy head 不使用的buffer
 } bcache;
 
+// 将bcache数组中的buffer串接成双向链表
 void
 binit(void)
 {
@@ -65,7 +66,7 @@ bget(uint dev, uint blockno)
   // Is the block already cached?
   for(b = bcache.head.next; b != &bcache.head; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
-      b->refcnt++;
+      b->refcnt++; // 当前block已经存在buffer
       release(&bcache.lock);
       acquiresleep(&b->lock);
       return b;
@@ -95,7 +96,7 @@ bread(uint dev, uint blockno)
   struct buf *b;
 
   b = bget(dev, blockno);
-  if(!b->valid) {
+  if(!b->valid) { // 新分配的buffer，需要从磁盘中读取相应的块
     virtio_disk_rw(b, 0);
     b->valid = 1;
   }
@@ -103,6 +104,7 @@ bread(uint dev, uint blockno)
 }
 
 // Write b's contents to disk.  Must be locked.
+// 将某个buffer块的内容写入磁盘
 void
 bwrite(struct buf *b)
 {
@@ -120,10 +122,11 @@ brelse(struct buf *b)
     panic("brelse");
 
   releasesleep(&b->lock);
+  // 确保唯一的进程使用该buffer
 
   acquire(&bcache.lock);
   b->refcnt--;
-  if (b->refcnt == 0) {
+  if (b->refcnt == 0) { // 该buffer没有被使用，将该buffer块移到链表的开头
     // no one is waiting for it.
     b->next->prev = b->prev;
     b->prev->next = b->next;

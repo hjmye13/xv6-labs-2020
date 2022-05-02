@@ -283,6 +283,7 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
+// 创建文件
 uint64
 sys_open(void)
 {
@@ -292,10 +293,10 @@ sys_open(void)
   struct inode *ip;
   int n;
 
-  if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
+  if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0) // 获取文件的路径和文件的类型
     return -1;
 
-  begin_op();
+  begin_op(); // 等待log变为可使用状态
 
   if(omode & O_CREATE){
     ip = create(path, T_FILE, 0, 0);

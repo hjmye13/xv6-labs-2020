@@ -69,7 +69,7 @@ balloc(uint dev)
 
   bp = 0;
   for(b = 0; b < sb.size; b += BPB){
-    bp = bread(dev, BBLOCK(b, sb));
+    bp = bread(dev, BBLOCK(b, sb)); // 
     for(bi = 0; bi < BPB && b + bi < sb.size; bi++){
       m = 1 << (bi % 8);
       if((bp->data[bi/8] & m) == 0){  // Is block free?
@@ -239,6 +239,9 @@ iupdate(struct inode *ip)
 // Find the inode with number inum on device dev
 // and return the in-memory copy. Does not lock
 // the inode and does not read it from disk.
+// 找到dev上编号为inum的inode
+// 返回in-memory copy
+// 不会lock inode也不会从磁盘上读出
 static struct inode*
 iget(uint dev, uint inum)
 {
@@ -252,15 +255,15 @@ iget(uint dev, uint inum)
     if(ip->ref > 0 && ip->dev == dev && ip->inum == inum){
       ip->ref++;
       release(&icache.lock);
-      return ip;
+      return ip; // 当前inode已经被cache，返回inode
     }
-    if(empty == 0 && ip->ref == 0)    // Remember empty slot.
+    if(empty == 0 && ip->ref == 0)    // Remember empty slot. 记录最先找到的可用cache的inode
       empty = ip;
   }
 
   // Recycle an inode cache entry.
   if(empty == 0)
-    panic("iget: no inodes");
+    panic("iget: no inodes"); // 没有可用的cache inode
 
   ip = empty;
   ip->dev = dev;
@@ -274,6 +277,7 @@ iget(uint dev, uint inum)
 
 // Increment reference count for ip.
 // Returns ip to enable ip = idup(ip1) idiom.
+// 增加ip对应node的引用次数
 struct inode*
 idup(struct inode *ip)
 {
@@ -626,11 +630,11 @@ skipelem(char *path, char *name)
 // path element into name, which must have room for DIRSIZ bytes.
 // Must be called inside a transaction since it calls iput().
 static struct inode*
-namex(char *path, int nameiparent, char *name)
+namex(char *path, int nameiparent, char *name) // path是调用者传入的参数，nameiparent为标志位，name为空
 {
   struct inode *ip, *next;
 
-  if(*path == '/')
+  if(*path == '/') // 根路径
     ip = iget(ROOTDEV, ROOTINO);
   else
     ip = idup(myproc()->cwd);

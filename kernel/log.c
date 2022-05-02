@@ -33,18 +33,18 @@
 // Contents of the header block, used for both the on-disk header block
 // and to keep track in memory of logged block# before commit.
 struct logheader {
-  int n;
-  int block[LOGSIZE]; // 30
+  int n; // 记录有多少log是committed
+  int block[LOGSIZE]; // 30 记录了磁盘上的哪些块被log
 };
 
 struct log {
   struct spinlock lock;
-  int start;
+  int start;  // 磁盘上[block2, block32) 由start和size决定
   int size;
-  int outstanding; // how many FS sys calls are executing.
-  int committing;  // in commit(), please wait.
+  int outstanding; // how many FS sys calls are executing. 有多少文件系统的系统调用在执行
+  int committing;  // in commit(), please wait. log是否在committing
   int dev;
-  struct logheader lh;
+  struct logheader lh; 
 };
 struct log log;
 
@@ -64,9 +64,10 @@ static void commit();
 void
 initlog(int dev, struct superblock *sb)
 {
-  if (sizeof(struct logheader) >= BSIZE)
+  if (sizeof(struct logheader) >= BSIZE) // 检查logheader的大小是否大于一个block
     panic("initlog: too big logheader");
 
+  // 根据superblock中的信息进行初始化
   initlock(&log.lock, "log");
   log.start = sb->logstart;
   log.size = sb->nlog;
@@ -81,22 +82,26 @@ install_trans(int recovering)
   int tail;
 
   for (tail = 0; tail < log.lh.n; tail++) {
+    // 为什么又拷贝了一次
     struct buf *lbuf = bread(log.dev, log.start+tail+1); // read log block
     struct buf *dbuf = bread(log.dev, log.lh.block[tail]); // read dst
     memmove(dbuf->data, lbuf->data, BSIZE);  // copy block to dst
-    bwrite(dbuf);  // write dst to disk
-    if(recovering == 0)
-      bunpin(dbuf);
+    bwrite(dbuf);  // write dst to disk // 将buffer写入磁盘
+    if(recovering == 0) // commit中recovering为0，recovery_from_log中为1
+      bunpin(dbuf); // recovery的过程，buffer的引用计数已经被减过了
     brelse(lbuf);
     brelse(dbuf);
   }
 }
 
 // Read the log header from disk into the in-memory log header
+// 从磁盘中将log header读入内存中的log header
 static void
 read_head(void)
 {
   struct buf *buf = bread(log.dev, log.start);
+  // 如果当前磁盘块的buffer存在的话，直接引用该buffer
+  // 如果该磁盘块的buffer不存在，则分配一块新的buffer，并将磁盘中的内容拷贝到buffer中
   struct logheader *lh = (struct logheader *) (buf->data);
   int i;
   log.lh.n = lh->n;
@@ -112,7 +117,9 @@ read_head(void)
 static void
 write_head(void)
 {
-  struct buf *buf = bread(log.dev, log.start);
+  struct buf *buf = bread(log.dev, log.start); // 读取log起始磁盘块对应的buffer
+  // buf 是log header所在磁盘块的buffer cache
+  // 这里的log是内存中的数据结构，不是磁盘中的log和log header
   struct logheader *hb = (struct logheader *) (buf->data);
   int i;
   hb->n = log.lh.n;
@@ -126,13 +133,18 @@ write_head(void)
 static void
 recover_from_log(void)
 {
-  read_head();
+  read_head(); // 读取磁盘中的head
   install_trans(1); // if committed, copy from log to disk
+  // 将提交的log更新到磁盘
   log.lh.n = 0;
   write_head(); // clear the log
 }
 
 // called at the start of each FS system call.
+// 文件系统的系统调用会以该函数开始
+// 检查log是否在committing
+// 检查log是否有足够的剩余空间
+// 增加正在执行系统调用的进程数
 void
 begin_op(void)
 {
@@ -155,30 +167,37 @@ begin_op(void)
 
 // called at the end of each FS system call.
 // commits if this was the last outstanding operation.
+// 所有文件系统系统调用的结束都会调用该函数
+// 运行的进程数-1
+// 如果没有运行文件系统系统调用的进程，则进行commit；否则唤醒等待log的进程
+// 
 void
 end_op(void)
 {
   int do_commit = 0;
 
   acquire(&log.lock);
-  log.outstanding -= 1;
+  log.outstanding -= 1; // 运行的进程数减一
   if(log.committing)
     panic("log.committing");
-  if(log.outstanding == 0){
-    do_commit = 1;
+  if(log.outstanding == 0){ // 没有运行的进程时，对当前transaction进行提交
+    do_commit = 1;          // 设置log的状态
     log.committing = 1;
-  } else {
+  } else { // 如果仍不能提交，则唤醒等待log的进程
     // begin_op() may be waiting for log space,
     // and decrementing log.outstanding has decreased
     // the amount of reserved space.
-    wakeup(&log);
+    wakeup(&log); 
   }
   release(&log.lock);
 
+  // 不是每个文件系统系统调用的结束都会调用commit
+  // 只有当该系统调用结束，并且没有其他进行使用文件系统的系统调用时，才会进行commit
   if(do_commit){
     // call commit w/o holding locks, since not allowed
     // to sleep with locks.
     commit();
+    // 获取log的锁，对transaction提交后唤醒等待log的进程
     acquire(&log.lock);
     log.committing = 0;
     wakeup(&log);
@@ -193,22 +212,26 @@ write_log(void)
   int tail;
 
   for (tail = 0; tail < log.lh.n; tail++) {
-    struct buf *to = bread(log.dev, log.start+tail+1); // log block
-    struct buf *from = bread(log.dev, log.lh.block[tail]); // cache block
-    memmove(to->data, from->data, BSIZE);
-    bwrite(to);  // write the log
-    brelse(from);
-    brelse(to);
+    // bread获取到的是磁盘块对应的buffer
+    // 因此log也进行buffer cache
+    struct buf *to = bread(log.dev, log.start+tail+1); // 不写log start（log header所在位置）对应的buffer cache
+    struct buf *from = bread(log.dev, log.lh.block[tail]); // cache block 磁盘上哪些块的内容被记录在log中
+    memmove(to->data, from->data, BSIZE); // 将磁盘块对应的buffer cache的内容拷贝到log的buffer cache中
+    bwrite(to);  // write the log 将buffer cache的内容写入磁盘
+    brelse(from); // 引用计数-- 如果当前buffer引用变为0则防止循环列表起始处
+    brelse(to); 
   }
 }
 
 static void
 commit()
 {
-  if (log.lh.n > 0) {
-    write_log();     // Write modified blocks from cache to log
+  if (log.lh.n > 0) { //log中有block
+    write_log();     // Write modified blocks from cache to log 将磁盘块对应的buffer cache写入log，然后从log中写入磁盘
     write_head();    // Write header to disk -- the real commit
+    // 将内存中数据结构log header的内容写入磁盘的log header
     install_trans(0); // Now install writes to home locations
+    // 将log中的内容提交到磁盘
     log.lh.n = 0;
     write_head();    // Erase the transaction from the log
   }
@@ -235,13 +258,13 @@ log_write(struct buf *b)
 
   acquire(&log.lock);
   for (i = 0; i < log.lh.n; i++) {
-    if (log.lh.block[i] == b->blockno)   // log absorbtion
+    if (log.lh.block[i] == b->blockno)   // log absorbtion 查看该磁盘块是否在log中已经存在
       break;
   }
-  log.lh.block[i] = b->blockno;
+  log.lh.block[i] = b->blockno; // 如果for没有找到blockno对应的log，则会分配一个新的，需要更新磁盘号
   if (i == log.lh.n) {  // Add new block to log?
-    bpin(b);
-    log.lh.n++;
+    bpin(b); // 对buf的引用++
+    log.lh.n++; // log中出现了一个新的块
   }
   release(&log.lock);
 }
