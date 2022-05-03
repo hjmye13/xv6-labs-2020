@@ -26,6 +26,7 @@ fileinit(void)
 }
 
 // Allocate a file structure.
+// 扫描文件表，分配一个新的file struct
 struct file*
 filealloc(void)
 {
@@ -44,6 +45,7 @@ filealloc(void)
 }
 
 // Increment ref count for file f.
+// 增加file的引用
 struct file*
 filedup(struct file *f)
 {
@@ -68,11 +70,13 @@ fileclose(struct file *f)
     release(&ftable.lock);
     return;
   }
+  // 释放file-1：修改file结构体
   ff = *f;
   f->ref = 0;
   f->type = FD_NONE;
   release(&ftable.lock);
 
+  // 释放file-2：根据file类型，调用相应的函数释放
   if(ff.type == FD_PIPE){
     pipeclose(ff.pipe, ff.writable);
   } else if(ff.type == FD_INODE || ff.type == FD_DEVICE){
@@ -84,17 +88,19 @@ fileclose(struct file *f)
 
 // Get metadata about file f.
 // addr is a user virtual address, pointing to a struct stat.
+// 获取file的元数据
+// addr是用户虚拟地址，指向stat结构体
 int
 filestat(struct file *f, uint64 addr)
 {
   struct proc *p = myproc();
   struct stat st;
   
-  if(f->type == FD_INODE || f->type == FD_DEVICE){
+  if(f->type == FD_INODE || f->type == FD_DEVICE){ // 只有这两种类型允许获取file元数据
     ilock(f->ip);
-    stati(f->ip, &st);
+    stati(f->ip, &st); // 将file元数据拷贝到内核地址
     iunlock(f->ip);
-    if(copyout(p->pagetable, addr, (char *)&st, sizeof(st)) < 0)
+    if(copyout(p->pagetable, addr, (char *)&st, sizeof(st)) < 0) // 从内核地址拷贝到用户虚拟地址
       return -1;
     return 0;
   }
@@ -108,7 +114,7 @@ fileread(struct file *f, uint64 addr, int n)
 {
   int r = 0;
 
-  if(f->readable == 0)
+  if(f->readable == 0) // 检查读权限
     return -1;
 
   if(f->type == FD_PIPE){
