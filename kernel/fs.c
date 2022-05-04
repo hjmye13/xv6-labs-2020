@@ -407,8 +407,8 @@ iunlockput(struct inode *ip)
 static uint
 bmap(struct inode *ip, uint bn)
 {
-  uint addr, *a;
-  struct buf *bp;
+  uint addr, *a, *a_2;
+  struct buf *bp, *bp_2;
 
   if(bn < NDIRECT){ // 直接链接的block内
     if((addr = ip->addrs[bn]) == 0)
@@ -430,6 +430,33 @@ bmap(struct inode *ip, uint bn)
     brelse(bp);
     return addr;
   }
+  bn -= NINDIRECT;
+
+  if(bn < NINDIRECT * NINDIRECT){
+    // Load 2-level indirect block, allocating if necessary.
+    // 判断一级目录是否存在
+    if((addr = ip->addrs[NDIRECT + 1]) == 0)
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev); // 分配间接链接的block目录的磁盘块
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+
+    uint level_1 = bn / NINDIRECT;
+    uint level_2 = bn % NINDIRECT;
+    if((addr = a[level_1]) == 0){ // 获取block目录的第n个
+      a[level_1] = addr = balloc(ip->dev); // balloc中已经将bitmap的变化进行了log_write
+      log_write(bp); // 这里log_write的是block目录的变化
+    }
+    brelse(bp);
+    bp_2 = bread(ip->dev, addr);
+    a_2 = (uint*)bp_2->data;
+    if ((addr = a_2[level_2]) == 0) {
+      a_2[level_2] = addr = balloc(ip->dev);
+      log_write(bp_2);
+    }
+    brelse(bp_2);
+    
+    return addr;
+  }
 
   panic("bmap: out of range");
 }
@@ -440,8 +467,8 @@ void
 itrunc(struct inode *ip)
 {
   int i, j;
-  struct buf *bp;
-  uint *a;
+  struct buf *bp, *bp_2;
+  uint *a, *a_2;
 
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){ // 释放直接链接的blocks
@@ -458,8 +485,29 @@ itrunc(struct inode *ip)
         bfree(ip->dev, a[j]);
     }
     brelse(bp);
-    bfree(ip->dev, ip->addrs[NDIRECT]); // 二级链接block
+    bfree(ip->dev, ip->addrs[NDIRECT]); // 第二层链接block
     ip->addrs[NDIRECT] = 0;
+  }
+
+  if(ip->addrs[NDIRECT + 1]){ // 释放间接链接的blocks
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint*)bp->data;
+    for(j = 0; j < NINDIRECT; j++){
+      if(a[j]) {
+        bp_2 = bread(ip->dev, a[j]);
+        a_2 = (uint*)bp_2->data;
+        for (int k = 0; k < NINDIRECT; k++) {
+          if (a_2[k])
+            bfree(ip->dev, a_2[k]);
+        }
+        brelse(bp_2);
+        bfree(ip->dev, a[j]); 
+        //a[j] = 0;
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]); 
+    ip->addrs[NDIRECT + 1] = 0;
   }
 
   ip->size = 0; 
