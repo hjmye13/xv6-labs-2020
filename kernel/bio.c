@@ -122,10 +122,11 @@ brelse(struct buf *b)
     panic("brelse");
 
   releasesleep(&b->lock);
-  // 确保唯一的进程使用该buffer
+  // 释放该block cache的锁
 
   acquire(&bcache.lock);
-  b->refcnt--;
+  b->refcnt--; // 这里只是表示当前进程不再关心block cache
+  // 如果另一个进程正在acquiresleep，那么refcnt必然不为0，也就不会执行下面if语句块中的内容
   if (b->refcnt == 0) { // 该buffer没有被使用，将该buffer块移到链表的开头
     // no one is waiting for it.
     b->next->prev = b->prev;

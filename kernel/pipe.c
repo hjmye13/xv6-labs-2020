@@ -19,6 +19,8 @@ struct pipe {
   int writeopen;  // write fd is still open
 };
 
+// 分配一个物理页，将其按照pipe的方式初始化
+// 读写段设置不同的权限，但是数据部分指向相同的物理页
 int
 pipealloc(struct file **f0, struct file **f1)
 {
@@ -26,9 +28,10 @@ pipealloc(struct file **f0, struct file **f1)
 
   pi = 0;
   *f0 = *f1 = 0;
+  // 传入的f0和f1是空指针，分配两个struct file
   if((*f0 = filealloc()) == 0 || (*f1 = filealloc()) == 0)
     goto bad;
-  if((pi = (struct pipe*)kalloc()) == 0)
+  if((pi = (struct pipe*)kalloc()) == 0) // 分配一个物理页，转化为pipe指针类型
     goto bad;
   pi->readopen = 1;
   pi->writeopen = 1;

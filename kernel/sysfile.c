@@ -37,7 +37,7 @@ argfd(int n, int *pfd, struct file **pf)
 
 // Allocate a file descriptor for the given file.
 // Takes over file reference from caller on success.
-// 为给定文件分配一个文件描述符
+// 在进程中，为给定文件分配一个文件描述符
 static int
 fdalloc(struct file *f)
 {
@@ -264,7 +264,7 @@ create(char *path, short type, short major, short minor)
     // dirloopup中会将引用计数++
       return ip; // 如果要创建的是文件，则直接返回
     iunlockput(ip);
-    // 如果是创建目录，需要将dirloopup中增加的引用次数复原
+    // 如果是创建目录，需要将dirlookup中增加的引用次数复原
     return 0;
   }
 
@@ -474,12 +474,13 @@ sys_pipe(void)
   int fd0, fd1;
   struct proc *p = myproc();
 
-  if(argaddr(0, &fdarray) < 0)
+  if(argaddr(0, &fdarray) < 0) // 获取数组地址
     return -1;
   if(pipealloc(&rf, &wf) < 0)
     return -1;
   fd0 = -1;
   if((fd0 = fdalloc(rf)) < 0 || (fd1 = fdalloc(wf)) < 0){
+    // 分别为读写端分配文件描述符
     if(fd0 >= 0)
       p->ofile[fd0] = 0;
     fileclose(rf);
@@ -488,6 +489,8 @@ sys_pipe(void)
   }
   if(copyout(p->pagetable, fdarray, (char*)&fd0, sizeof(fd0)) < 0 ||
      copyout(p->pagetable, fdarray+sizeof(fd0), (char *)&fd1, sizeof(fd1)) < 0){
+       // 将分配的读写端的文件描述符拷贝到用户给定的数组中
+    // 拷贝失败，释放分配的文件描述符，关闭文件
     p->ofile[fd0] = 0;
     p->ofile[fd1] = 0;
     fileclose(rf);
