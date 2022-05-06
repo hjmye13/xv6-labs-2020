@@ -5,6 +5,11 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "sleeplock.h"
+#include "proc.h"
+#include "file.h"
+#include "fcntl.h"
 
 /*
  * the kernel's page table.
@@ -428,4 +433,90 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+void
+vmaunmap(pagetable_t pagetable, uint64 va, uint64 nbytes, struct vma *v)
+{
+  uint64 a;
+  pte_t *pte;
+
+  for (a = va; a < va + nbytes; a += PGSIZE) {
+    if ((pte = walk(pagetable, a, 0)) == 0) {
+      panic("vmaunmap: walk\n");
+    }
+    if (PTE_FLAGS(*pte) == PTE_V) {
+      panic("vmaunmap: not a leaf\n");
+    }
+    if (*pte & PTE_V) {
+      uint64 pa = PTE2PA(*pte);
+      if ((*pte & PTE_D) && (v->flags & MAP_SHARED)) {
+        begin_op();
+        ilock(v->f->ip);
+        uint64 aoff = a - v->vastart;
+        if (aoff < 0) {
+          writei(v->f->ip, 0, pa + (-aoff), v->offset, PGSIZE + aoff);        
+        } else if (aoff + PGSIZE > v->sz) {
+          writei(v->f->ip, 0, pa, v->offset + aoff, v->sz - aoff);
+        } else {
+          writei(v->f->ip, 0, pa, v->offset + aoff, PGSIZE);
+        }
+        iunlock(v->f->ip);
+        end_op();
+      }
+      kfree((void*)pa);
+      *pte = 0;
+    }
+  }
+}
+
+struct vma*
+findvma(struct proc *p, uint64 va) {
+  for (int i = 0; i < NVMA; i++) {
+    struct vma *vv = &p->vmas[i];
+    if (vv->valid == 1 && va >= vv->vastart && va < vv->vastart + vv->sz) {
+      return vv;
+    }
+  }
+  return 0;
+}
+
+int
+vmalazytouch(uint64 va) {
+  struct proc *p = myproc();
+  struct vma *v = findvma(p, va);
+  if (v == 0) {
+    return 0;
+  }
+  
+  void *pa = kalloc();
+  if (pa == 0) {
+    panic("vmalazytouch: kaclloc\n");
+  }
+  memset(pa, 0, PGSIZE);
+
+  begin_op();
+  ilock(v->f->ip); // 获取in-memory inode的访问权限，如果需要的话，会将磁盘上dinode内容拷贝到inode中
+  readi(v->f->ip, 0, (uint64)pa, v->offset + PGROUNDDOWN(va - v->vastart), PGSIZE);
+  // 读取va所在的那一页
+  // 从inode复制到物理页
+  iunlock(v->f->ip);
+  end_op();
+
+  int perm = PTE_U;
+  if (v->prot & PROT_READ) {
+    perm |= PTE_R;
+  }
+  if(v->prot & PROT_WRITE) {
+    perm |= PTE_W;
+  }
+  if(v->prot & PROT_EXEC) {
+    perm |= PTE_X;
+  }
+  
+  if (mappages(p->pagetable, va, PGSIZE, (uint64)pa, PTE_R | PTE_W | PTE_U) < 0) {
+    panic("vmalazytouch: mappages\n");
+  }
+
+  return 1;
 }

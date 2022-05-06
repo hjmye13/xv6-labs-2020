@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -483,4 +484,102 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+
+uint64
+sys_mmap(void)
+{
+  uint64 addr, sz, offset;
+  int prot, flags, fd;
+  struct file *f;
+
+  if (argaddr(0, &addr) < 0 || argaddr(1, &sz) < 0 || argint(2, &prot) < 0
+    ||argint(3, &flags) < 0 || argfd(4, &fd, &f) < 0 || argaddr(5, &offset) < 0 || sz == 0) {
+      return -1;
+  }
+
+  if ((!f->readable && (prot & PROT_READ))
+      || (!f->writable && (prot & PROT_WRITE) && !(flags & MAP_PRIVATE))) {
+      return -1;
+  }
+
+  sz = PGROUNDUP(sz);
+
+  struct proc *p = myproc();
+  struct vma *v = 0;
+  uint64 vmaend = MMAPEND;
+
+  for (int i = 0; i < NVMA; i++) {
+    struct vma *vv = &p->vmas[i];
+    if (vv->valid == 0) {
+      if (v == 0) {
+        v = &p->vmas[i];
+        v->valid = 1;
+      }
+    } else if (vv->vastart < vmaend) {
+      vmaend = PGROUNDDOWN(vv->vastart);
+    }
+  }
+
+  if (v == 0) {
+    panic("mmap: no free vma\n");
+  }
+
+  v->vastart = vmaend - sz;
+  v->sz = sz;
+  v->prot = prot;
+  v->flags = flags;
+  v->f = f;
+  v->offset = offset;
+
+  filedup(v->f); // 增加文件的引用
+  return v->vastart;
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr, sz;
+  if (argaddr(0, &addr) < 0 || argaddr(1, &sz) < 0 || sz == 0) {
+    return -1;
+  }
+
+  struct proc *p = myproc();
+  
+  struct vma *v = findvma(p, addr);
+  if (v == 0) {
+    return -1;
+  }
+
+  if (addr > v->vastart && addr + sz < v->vastart + v->sz) {
+    // 不允许连续地址空间释放之间的一部分
+    return -1;
+  }
+
+  uint64 addr_aligned = addr;
+  if (addr > v->vastart) {
+    addr_aligned = PGROUNDUP(addr);
+  }
+
+  int nunmap = sz - (addr_aligned - addr);
+  if (nunmap < 0) {
+    nunmap = 0;
+  }
+
+  vmaunmap(p->pagetable, addr_aligned, nunmap, v);
+
+  if (addr <= v->vastart && addr + sz > v->vastart) {
+    v->offset += addr + sz - v->vastart;
+    v->vastart = addr + sz;
+  }
+  // 只有在起始地址小于vastart，终止地址在vastart和vastart+sz之间的情况下，这种修正才真正有效果
+  v->sz -= sz;
+
+  if(v->sz <= 0) {
+    fileclose(v->f);
+    v->valid = 0;
+  }
+
+  return 0; 
 }
