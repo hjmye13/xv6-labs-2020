@@ -77,10 +77,11 @@ static inline uint32 bswapl(uint32 val)
 #define ETHADDR_LEN 6
 
 // an Ethernet packet header (start of the packet).
+// 以太网地址（MAC）48bit，唯一标识一个网卡
 struct eth {
-  uint8  dhost[ETHADDR_LEN];
-  uint8  shost[ETHADDR_LEN];
-  uint16 type;
+  uint8  dhost[ETHADDR_LEN]; // 目的地址 6
+  uint8  shost[ETHADDR_LEN]; // 源地址 6
+  uint16 type; // 包类型
 } __attribute__((packed));
 
 #define ETHTYPE_IP  0x0800 // Internet protocol
