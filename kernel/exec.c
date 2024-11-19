@@ -116,6 +116,9 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
 
+  // 添加复制逻辑
+  u2kvmcopy(pagetable, p->kernelpt, 0, sz);
+
   if (p->pid == 1)
     vmprint(p->pagetable);
 
